@@ -1,0 +1,43 @@
+# Node.js
+**/node_modules/
+**/dist/
+**/build/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDEs / Editors
+.vscode/
+.idea/
+*.code-workspace
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# NestJS
+**/.nestjs/
+
+# Vite / React / Frontend tools
+**/.turbo/
+**/.vite/
+**/.parcel-cache/
+
+# Docker volumes, artifacts
+**/docker-volume/
+**/.docker/
+
+# Cache & coverage
+**/.cache/
+**/coverage/
+
+# Misc
+*.tgz
