@@ -1,4 +1,4 @@
-name: Build & Deploy Microservices v2
+name: Build & Deploy Microservices v2 
 
 on:
   push:
@@ -33,6 +33,8 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Ensure full git history for detecting changes
 
       - name: Set up Docker Compose v2
         run: |
@@ -76,23 +78,31 @@ jobs:
         id: changes
         run: |
           echo "Detecting changed microservices..."
-          changed=""
+          changed_services=()
 
           base_ref=$(git merge-base origin/main HEAD)
           changed_files=$(git diff --name-only "$base_ref" HEAD)
 
+          echo "Changed files:"
+          echo "$changed_files"
+
           if echo "$changed_files" | grep -q "^backend/microservice-a/"; then
-            changed="$changed microservice-a"
+            changed_services+=("microservice-a")
           fi
           if echo "$changed_files" | grep -q "^backend/microservice-b/"; then
-            changed="$changed microservice-b"
+            changed_services+=("microservice-b")
           fi
           if echo "$changed_files" | grep -q "^frontend/"; then
-            changed="$changed frontend"
+            changed_services+=("frontend")
           fi
 
-          echo "Changed services: $changed"
-          echo "services=$changed" >> "$GITHUB_OUTPUT"
+          services=$(IFS=" "; echo "${changed_services[*]}")
+          echo "Detected changed services: $services"
+
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+
+      - name: Debug changed services output
+        run: echo "Services to build: '${{ steps.changes.outputs.services }}'"
 
       - name: Build and push changed services
         if: steps.changes.outputs.services != ''
