@@ -40,7 +40,7 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           token_format: 'access_token'
-          workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-wif/providers/github'
+          workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'github-wif@das-terraform-dry-run.iam.gserviceaccount.com'
           
       - name: Configure Docker to use Artifact Registry
