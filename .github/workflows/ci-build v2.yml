@@ -8,11 +8,17 @@ on:
       - "frontend/**"
       - ".github/workflows/**"
       - "cloud-dry-run/docker-compose.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/**"
+      - "cloud-dry-run/docker-compose.yml"
 
 jobs:
   build-and-deploy:
     name: Build & Deploy Affected Microservices
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     environment:
@@ -21,8 +27,8 @@ jobs:
 
     permissions:
       contents: read
-      id-token: write  # Needed for Workload Identity Federation
-      pull-requests: write  # Needed to comment on PR
+      id-token: write
+      pull-requests: write
 
     steps:
       - name: Checkout source code
@@ -35,14 +41,12 @@ jobs:
           chmod +x ~/.docker/cli-plugins/docker-compose
           docker compose version
 
-
-      - name: Authenticate to Google Cloud via Workload Identity Federation
+      - name: Authenticate to Google Cloud using Workload Identity Federation
         uses: google-github-actions/auth@v2
         with:
-          token_format: 'access_token'
           workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'github-wif@das-terraform-dry-run.iam.gserviceaccount.com'
-          
+
       - name: Configure Docker to use Artifact Registry
         run: |
           gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
@@ -74,9 +78,8 @@ jobs:
           echo "Detecting changed microservices..."
           changed=""
 
-          # Compare with base ref (defaults to previous commit on main)
           base_ref=$(git merge-base origin/main HEAD)
-          changed_files=$(git diff --name-only "$base_ref" HEAD)    
+          changed_files=$(git diff --name-only "$base_ref" HEAD)
 
           if echo "$changed_files" | grep -q "^backend/microservice-a/"; then
             changed="$changed microservice-a"
@@ -104,8 +107,20 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: List recent images from Artifact Registry
+      - name: List recent images for changed services
+        if: steps.changes.outputs.services != ''
         run: |
+          for svc in ${{ steps.changes.outputs.services }}; do
+            echo "::group::Recent images for $svc"
+            gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
+              --limit=5 \
+              --format="table[box](DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
+            echo "::endgroup::"
+          done
+
+      - name: List recent images for all microservices
+        run: |
+          echo "📦 Listing Docker images for all services:"
           for svc in microservice-a microservice-b frontend; do
             echo "::group::Images for $svc"
             gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
@@ -114,22 +129,5 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Comment on PR with services built
-        if: github.event_name == 'pull_request' && steps.changes.outputs.services != ''
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            🚀 **Microservices Build Report**
-            The following services were detected as changed and have been built/pushed to Google Artifact Registry:
-
-            ```
-            ${{ steps.changes.outputs.services }}
-            ```
-
-            ✅ View full logs: [GitHub Action Run #${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
       - name: Workflow completed
-        run: echo "CI/CD workflow completed successfully and tested ."
-
+        run: echo "✅ CI/CD workflow completed successfully."
