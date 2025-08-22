@@ -12,23 +12,20 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    permissions:        # 👈 add this block
-      contents: read    # allow reading the repo
+    permissions:
+      contents: read
       id-token: write
 
     steps:
-      # ✅ Checkout code from the repository
       - name: Checkout source code
         uses: actions/checkout@v3
 
-      # ✅ Print current directory and list top-level files for debugging
       - name: Debug — Current directory and top-level files
         run: |
           echo "Current directory: $(pwd)"
           echo "Listing top-level files:"
           ls -la
 
-      # ✅ Verify that the docker-compose.yml file exists in the correct path
       - name: Check docker-compose.yml exists
         run: |
           if [ -f cloud-dry-run/docker-compose.yml ]; then
@@ -38,7 +35,6 @@ jobs:
             exit 1
           fi
 
-      # ✅ Install Docker Compose plugin manually
       - name: Install Docker Compose CLI plugin
         run: |
           mkdir -p ~/.docker/cli-plugins/
@@ -46,21 +42,17 @@ jobs:
           chmod +x ~/.docker/cli-plugins/docker-compose
           docker compose version
 
-      # ✅ Authenticate to Google Cloud using Workload Identity Federation (no secrets used)
       - name: Authenticate with Google Cloud using Workload Identity Federation
         uses: google-github-actions/auth@v2
         with:
           token_format: 'access_token'
-          # Replace with your actual WIF provider and service account email
           workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
           
-      # ✅ Configure Docker to authenticate with Artifact Registry
       - name: Configure Docker for Artifact Registry
         run: |
           gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
 
-      # ✅ Ensure the Docker repository exists in Artifact Registry, or create it
       - name: Ensure Artifact Registry repo exists or create it
         run: |
           set -e
@@ -80,17 +72,14 @@ jobs:
             echo "Repository '$REPO_NAME' created successfully."
           fi
 
-      # ✅ Build all services/images defined in the Docker Compose file
       - name: Build all Docker images with Docker Compose
         run: |
           docker compose -f cloud-dry-run/docker-compose.yml build
 
-      # ✅ Push all built images to Google Artifact Registry
       - name: Push all Docker images with Docker Compose
         run: |
           docker compose -f cloud-dry-run/docker-compose.yml push
 
-      # ✅ List recently pushed images for each service
       - name: List recent images in Artifact Registry
         run: |
           for svc in microservice-a microservice-b frontend; do
@@ -101,6 +90,5 @@ jobs:
             echo "::endgroup::"
           done
 
-      # ✅ Final confirmation step that pipeline succeeded
       - name: Workflow completed successfully
         run: echo "CI pipeline completed successfully. All images built and pushed to Google Artifact Registry."
