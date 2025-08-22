@@ -14,14 +14,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ✅ Checkout code from the repository
       - name: Checkout source code
         uses: actions/checkout@v3
 
+      # ✅ Print current directory and list top-level files for debugging
       - name: Debug — Current directory and top-level files
         run: |
           echo "Current directory: $(pwd)"
           echo "Listing top-level files:"
           ls -la
+
+      # ✅ Verify that the docker-compose.yml file exists in the correct path
       - name: Check docker-compose.yml exists
         run: |
           if [ -f cloud-dry-run/docker-compose.yml ]; then
@@ -30,28 +34,29 @@ jobs:
             echo "docker-compose.yml NOT found"
             exit 1
           fi
+
+      # ✅ Install Docker Compose plugin manually
       - name: Install Docker Compose CLI plugin
         run: |
           mkdir -p ~/.docker/cli-plugins/
           curl -SL https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
           chmod +x ~/.docker/cli-plugins/docker-compose
           docker compose version
-      - name: Confirm GCP_SA_KEY is injected
-        run: |
-          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
-            echo "GCP_SA_KEY is missing or not injected!"
-            exit 1
-          else
-            echo "GCP_SA_KEY is present."
-          fi
-      - name: Authenticate with Google Cloud
+
+      # ✅ Authenticate to Google Cloud using Workload Identity Federation (no secrets used)
+      - name: Authenticate with Google Cloud using Workload Identity Federation
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+          # Replace with your actual WIF provider and service account email
+          workload_identity_provider: 'projects/123456789012/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'github-ci@das-terraform-dry-run.iam.gserviceaccount.com'
 
+      # ✅ Configure Docker to authenticate with Artifact Registry
       - name: Configure Docker for Artifact Registry
         run: |
           gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
+
+      # ✅ Ensure the Docker repository exists in Artifact Registry, or create it
       - name: Ensure Artifact Registry repo exists or create it
         run: |
           set -e
@@ -70,12 +75,18 @@ jobs:
               --project="$PROJECT_ID"
             echo "Repository '$REPO_NAME' created successfully."
           fi
+
+      # ✅ Build all services/images defined in the Docker Compose file
       - name: Build all Docker images with Docker Compose
         run: |
           docker compose -f cloud-dry-run/docker-compose.yml build
+
+      # ✅ Push all built images to Google Artifact Registry
       - name: Push all Docker images with Docker Compose
         run: |
           docker compose -f cloud-dry-run/docker-compose.yml push
+
+      # ✅ List recently pushed images for each service
       - name: List recent images in Artifact Registry
         run: |
           for svc in microservice-a microservice-b frontend; do
@@ -85,5 +96,7 @@ jobs:
               --format="table[box](DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
             echo "::endgroup::"
           done
+
+      # ✅ Final confirmation step that pipeline succeeded
       - name: Workflow completed successfully
         run: echo "CI pipeline completed successfully. All images built and pushed to Google Artifact Registry."
