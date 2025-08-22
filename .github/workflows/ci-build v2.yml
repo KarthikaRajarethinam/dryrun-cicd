@@ -1,5 +1,6 @@
 name: Build & Deploy Microservices
 
+# Trigger workflow on push to main branch for specified paths
 on:
   push:
     branches: [main]
@@ -9,24 +10,62 @@ on:
       - ".github/workflows/**"
       - "cloud-dry-run/docker-compose.yml"
 
+  # Also enable manual trigger (workflow_dispatch) with environment input
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Deployment environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - stage
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
+    # Permissions required for checking out code and getting ID tokens for Workload Identity
     permissions:
       contents: read
       id-token: write
 
+    # Run conditions: 
+    # - Automatically on push (default to dev environment)
+    # - Manually when triggered with either dev or stage environment selected
+    if: |
+      (github.event_name == 'push' && 'dev' == 'dev') ||  # Runs on push automatically (dev)
+      (github.event_name == 'workflow_dispatch' && contains(['dev', 'stage'], github.event.inputs.env))
+
+    # Set environment for job:
+    # - 'stage' environment will trigger manual approval from reviewers configured in repo settings
+    # - 'dev' runs immediately without approval
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.env == 'stage' && 'stage' || 'dev' }}
+
     steps:
+      - name: Set environment variable ENV
+        # Sets ENV variable based on trigger type
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "ENV=dev" >> $GITHUB_ENV
+          else
+            echo "ENV=${{ github.event.inputs.env }}" >> $GITHUB_ENV
+          fi
+
       - name: Checkout source code
+        # Checkout the repository code for the workflow
         uses: actions/checkout@v3
 
       - name: Debug — Current directory and top-level files
+        # Prints current directory and lists files for debugging purposes
         run: |
           echo "Current directory: $(pwd)"
           echo "Listing top-level files:"
           ls -la
 
       - name: Check docker-compose.yml exists
+        # Verify docker-compose.yml file exists at specified path before continuing
         run: |
           if [ -f cloud-dry-run/docker-compose.yml ]; then
             echo "docker-compose.yml found"
@@ -36,6 +75,7 @@ jobs:
           fi
 
       - name: Install Docker Compose CLI plugin
+        # Installs Docker Compose v2 CLI plugin to run docker compose commands
         run: |
           mkdir -p ~/.docker/cli-plugins/
           curl -SL https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
@@ -43,17 +83,20 @@ jobs:
           docker compose version
 
       - name: Authenticate with Google Cloud using Workload Identity Federation
+        # Authenticate to GCP using Workload Identity Federation with GitHub Actions OIDC token
         uses: google-github-actions/auth@v2
         with:
           token_format: 'access_token'
           workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
-          
+
       - name: Configure Docker for Artifact Registry
+        # Configures Docker client to authenticate with Google Artifact Registry
         run: |
           gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
 
       - name: Ensure Artifact Registry repo exists or create it
+        # Checks if the Artifact Registry repository exists, and creates it if missing
         run: |
           set -e
           REPO_NAME="das-docker-repo"
@@ -73,14 +116,17 @@ jobs:
           fi
 
       - name: Build all Docker images with Docker Compose
+        # Builds all defined Docker images from docker-compose.yml
         run: |
           docker compose -f cloud-dry-run/docker-compose.yml build
 
       - name: Push all Docker images with Docker Compose
+        # Pushes all Docker images to Google Artifact Registry
         run: |
           docker compose -f cloud-dry-run/docker-compose.yml push
 
       - name: List recent images in Artifact Registry
+        # Lists last 5 pushed Docker images for each service in Artifact Registry for verification
         run: |
           for svc in microservice-a microservice-b frontend; do
             echo "::group::${svc}"
@@ -91,4 +137,5 @@ jobs:
           done
 
       - name: Workflow completed successfully
-        run: echo "CI pipeline completed successfully. All images built and pushed to Google Artifact Registry."
+        # Confirmation message that pipeline completed for specified environment
+        run: echo "CI pipeline completed successfully for environment: $ENV"
