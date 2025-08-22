@@ -31,44 +31,45 @@ jobs:
       pull-requests: write
 
     steps:
-      # Step 1: Checkout source code
+      # Step 1: Checkout the source code
       - name: Checkout source code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Needed to compare changes between commits
+          fetch-depth: 0
 
-      # Step 2: Set up Docker Compose v2 manually
+      # Step 2: Install Google Cloud SDK (to ensure gcloud is available)
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: das-terraform-dry-run
+
+      # Step 3: Set up Docker Compose v2
       - name: Set up Docker Compose v2
         run: |
           mkdir -p ~/.docker/cli-plugins/
           curl -SL https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
           chmod +x ~/.docker/cli-plugins/docker-compose
-          docker compose version  # Confirm it's working
+          docker compose version
 
-      # Step 3: Authenticate to Google Cloud using Workload Identity Federation (no secrets)
-      - name: Authenticate with Google Cloud (Workload Identity Federation)
+      # Step 4: Authenticate to Google Cloud using Workload Identity Federation
+      - name: Authenticate with Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'github-wif@das-terraform-dry-run.iam.gserviceaccount.com'
 
-      # Step 4: Configure Docker to push to Artifact Registry
+      # Step 5: Configure Docker to push to Artifact Registry
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
 
-      # Step 5: Ensure Docker Artifact Registry repo exists (create it if missing)
+      # Step 6: Ensure the Artifact Registry repo exists
       - name: Ensure Artifact Registry Repo Exists
         run: |
-          set -e
           REPO_NAME="das-docker-repo"
           LOCATION="australia-southeast1"
           PROJECT_ID="das-terraform-dry-run"
 
-          echo "Checking if repo '$REPO_NAME' exists..."
-          if gcloud artifacts repositories describe "$REPO_NAME" --location="$LOCATION" --project="$PROJECT_ID" >/dev/null 2>&1; then
-            echo "Repo already exists."
-          else
-            echo "Creating repo '$REPO_NAME'..."
+          if ! gcloud artifacts repositories describe "$REPO_NAME" --location="$LOCATION" --project="$PROJECT_ID" >/dev/null 2>&1; then
             gcloud artifacts repositories create "$REPO_NAME" \
               --repository-format=docker \
               --location="$LOCATION" \
@@ -76,19 +77,15 @@ jobs:
               --project="$PROJECT_ID"
           fi
 
-      # Step 6: Detect which microservices changed since the last main commit
+      # Step 7: Detect which microservices changed
       - name: Detect Changed Microservices
         id: changes
         run: |
-          echo "Looking for changed microservices..."
           changed_services=()
 
-          # Compare changes with base of main branch
           base_ref=$(git merge-base origin/main HEAD)
           changed_files=$(git diff --name-only "$base_ref" HEAD)
-          echo "$changed_files"
 
-          # Check for changes in specific microservice paths
           if echo "$changed_files" | grep -q "^backend/microservice-a/"; then
             changed_services+=("microservice-a")
           fi
@@ -99,89 +96,66 @@ jobs:
             changed_services+=("frontend")
           fi
 
-          # Convert array to space-separated string and export to GitHub output
           services=$(IFS=" "; echo "${changed_services[*]}")
-          echo "Changed services: $services"
           echo "services=$services" >> "$GITHUB_OUTPUT"
 
-      # Step 7: Build, tag, and push only the changed microservices
+      # Step 8: Build and push Docker images for changed services
       - name: Build, Tag, and Push Changed Images
         if: steps.changes.outputs.services != ''
         env:
           PROJECT_ID: das-terraform-dry-run
           REGION: australia-southeast1
           REPO: das-docker-repo
+          GIT_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${{ github.ref_name }}
         run: |
           set -e
-          GIT_SHA=${{ github.sha }}  # Use commit SHA for tagging
-          BRANCH_NAME=${GITHUB_REF##*/}  # Get branch name
 
           for svc in ${{ steps.changes.outputs.services }}; do
-            echo "::group::Building $svc"
+            echo "Building and tagging $svc..."
+
+            # Build image using Docker Compose
             docker compose -f cloud-dry-run/docker-compose.yml build "$svc"
-            echo "::endgroup::"
 
             IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$svc"
-            echo "Image will be pushed to: $IMAGE_URI"
 
-            echo "::group::Tagging $svc"
-            docker tag "$svc" "$IMAGE_URI:$GIT_SHA"  # Tag with commit SHA
+            # Tag image with commit SHA
+            docker tag "$IMAGE_URI" "$IMAGE_URI:$GIT_SHA"
+
+            # Tag as 'latest' if on main branch
             if [[ "$BRANCH_NAME" == "main" ]]; then
-              docker tag "$svc" "$IMAGE_URI:latest"  # Also tag as latest
+              docker tag "$IMAGE_URI" "$IMAGE_URI:latest"
             fi
-            echo "::endgroup::"
 
-            echo "::group::Pushing $svc"
-            set +e  # Temporarily disable fail-fast for push status checks
+            echo "Pushing $IMAGE_URI:$GIT_SHA"
             docker push "$IMAGE_URI:$GIT_SHA"
-            STATUS_SHA=$?
 
             if [[ "$BRANCH_NAME" == "main" ]]; then
+              echo "Pushing $IMAGE_URI:latest"
               docker push "$IMAGE_URI:latest"
-              STATUS_LATEST=$?
-            else
-              STATUS_LATEST=0
             fi
-            set -e  # Re-enable fail-fast
-
-            # Confirm image push was successful
-            if [[ $STATUS_SHA -eq 0 && $STATUS_LATEST -eq 0 ]]; then
-              echo "Image pushed successfully: $IMAGE_URI:$GIT_SHA"
-              if [[ "$BRANCH_NAME" == "main" ]]; then
-                echo "Also tagged as latest: $IMAGE_URI:latest"
-              fi
-            else
-              echo "Failed to push image for $svc"
-              exit 1
-            fi
-            echo "::endgroup::"
           done
 
-      # Step 8: Show recent image versions for changed services
+      # Step 9: Show recent images for changed services
       - name: List Recent Images for Changed Services
         if: steps.changes.outputs.services != ''
         run: |
           for svc in ${{ steps.changes.outputs.services }}; do
-            echo "::group::Recent images for $svc"
             gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
               --limit=5 \
-              --format="table[box](DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
-            echo "::endgroup::"
+              --format="table(DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
           done
 
-      # Step 9: Show images for all microservices for visibility
+      # Step 10: Show images for all microservices
       - name: List Images for All Microservices
         run: |
-          echo "Listing Docker images for all services:"
           for svc in microservice-a microservice-b frontend; do
-            echo "::group::Images for $svc"
             gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
               --limit=5 \
-              --format="table[box](DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
-            echo "::endgroup::"
+              --format="table(DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
           done
 
-      # Step 10: List all Docker images in Artifact Registry for all microservices
+      # Step 11: List all images in Artifact Registry (for visibility)
       - name: List All Images in Artifact Registry
         run: |
           PROJECT_ID="das-terraform-dry-run"
@@ -189,15 +163,11 @@ jobs:
           REPO="das-docker-repo"
           SERVICES=("microservice-a" "microservice-b" "frontend")
 
-          echo "Listing all Docker images in Artifact Registry repository '$REPO':"
-
           for svc in "${SERVICES[@]}"; do
-            echo "::group::Images for $svc"
             gcloud artifacts docker images list $LOCATION-docker.pkg.dev/$PROJECT_ID/$REPO/$svc \
               --limit=10 \
-              --format="table[box](DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
-            echo "::endgroup::"
+              --format="table(DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
           done
-      # Final step: confirm completion
+      # Step 12: Confirm success
       - name: Workflow Completed
         run: echo "CI/CD workflow completed successfully."
