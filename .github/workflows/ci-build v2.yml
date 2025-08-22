@@ -1,7 +1,6 @@
 name: Build & Deploy Microservices
 
 on:
-  # Auto-run on push to main (dev environment)
   push:
     branches: [main]
     paths:
@@ -10,18 +9,6 @@ on:
       - ".github/workflows/**"
       - "cloud-dry-run/docker-compose.yml"
 
-  # Allow manual trigger with environment input
-  workflow_dispatch:
-    inputs:
-      env:
-        description: 'Target environment'
-        required: true
-        default: 'dev'
-        type: choice
-        options:
-          - dev
-          - stage
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -29,23 +16,7 @@ jobs:
       contents: read
       id-token: write
 
-    # Determine which environment to use
-    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.env || 'dev' }}
-
-    # Only run if push OR manual input is dev or stage
-    if: |
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && contains(['dev', 'stage'], github.event.inputs.env))
-
     steps:
-      - name: Set environment variable ENV
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "ENV=dev" >> $GITHUB_ENV
-          else
-            echo "ENV=${{ github.event.inputs.env }}" >> $GITHUB_ENV
-          fi
-
       - name: Checkout source code
         uses: actions/checkout@v3
 
@@ -77,7 +48,7 @@ jobs:
           token_format: 'access_token'
           workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
-
+          
       - name: Configure Docker for Artifact Registry
         run: |
           gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
@@ -120,4 +91,4 @@ jobs:
           done
 
       - name: Workflow completed successfully
-        run: echo "CI pipeline completed successfully for environment: $ENV"
+        run: echo "CI pipeline completed successfully. All images built and pushed to Google Artifact Registry."
