@@ -72,27 +72,33 @@ jobs:
             echo "Repository '$REPO_NAME' created successfully."
           fi
 
-      - name: Detect changed microservices
-        id: changes
-        run: |
-          echo "Detecting changed microservices..."
-          changed=""
+     - name: Detect changed microservices
+  id: changes
+  run: |
+    echo "Detecting changed microservices..."
+    changed_services=()
 
-          base_ref=$(git merge-base origin/main HEAD)
-          changed_files=$(git diff --name-only "$base_ref" HEAD)
+    base_ref=$(git merge-base origin/main HEAD)
+    changed_files=$(git diff --name-only "$base_ref" HEAD)
 
-          if echo "$changed_files" | grep -q "^backend/microservice-a/"; then
-            changed="$changed microservice-a"
-          fi
-          if echo "$changed_files" | grep -q "^backend/microservice-b/"; then
-            changed="$changed microservice-b"
-          fi
-          if echo "$changed_files" | grep -q "^frontend/"; then
-            changed="$changed frontend"
-          fi
+    echo "$changed_files"
 
-          echo "Changed services: $changed"
-          echo "services=$changed" >> "$GITHUB_OUTPUT"
+    if echo "$changed_files" | grep -q "^backend/microservice-a/"; then
+      changed_services+=("microservice-a")
+    fi
+    if echo "$changed_files" | grep -q "^backend/microservice-b/"; then
+      changed_services+=("microservice-b")
+    fi
+    if echo "$changed_files" | grep -q "^frontend/"; then
+      changed_services+=("frontend")
+    fi
+
+    # Join array into a single space-separated string
+    services=$(IFS=" "; echo "${changed_services[*]}")
+
+    echo "Changed services: $services"
+    echo "services=$services" >> "$GITHUB_OUTPUT"
+
 
       - name: Build and push changed services
         if: steps.changes.outputs.services != ''
