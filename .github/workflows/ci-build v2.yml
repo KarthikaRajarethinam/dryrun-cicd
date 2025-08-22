@@ -48,9 +48,9 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           # Replace with your actual WIF provider and service account email
-          workload_identity_provider: 'projects/123456789012/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
-          service_account: 'github-ci@das-terraform-dry-run.iam.gserviceaccount.com'
-
+          workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
+          service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
+          
       # ✅ Configure Docker to authenticate with Artifact Registry
       - name: Configure Docker for Artifact Registry
         run: |
