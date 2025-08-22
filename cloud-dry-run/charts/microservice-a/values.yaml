@@ -1,0 +1,16 @@
+replicaCount: 2
+
+image:
+  repository: australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/microservice-a
+  tag: "latest" # {"$imagepolicy": "production:microservice-a:tag"}
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+

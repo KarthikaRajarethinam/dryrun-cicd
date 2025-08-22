@@ -1,0 +1,12 @@
+replicaCount: 2
+image:
+  repository: australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/frontend
+  tag: "latest" # {"$imagepolicy": "production:frontend:tag"}
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 80
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,25 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: microservice-a
+  namespace: production
+spec:
+  interval: 1m
+  chart:
+    spec:
+      chart: cloud-dry-run/charts/microservice-a
+      sourceRef:
+        kind: GitRepository
+        name: dryrun-cicd
+        namespace: production
+      interval: 1m
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    image:
+      repository: australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/microservice-a
+      tag: "latest" # {"$imagepolicy": "production:microservice-a:tag"}
