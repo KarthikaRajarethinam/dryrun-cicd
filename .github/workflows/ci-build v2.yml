@@ -12,6 +12,9 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:        # 👈 add this block
+      contents: read    # allow reading the repo
+      id-token: write
 
     steps:
       # ✅ Checkout code from the repository
@@ -47,6 +50,7 @@ jobs:
       - name: Authenticate with Google Cloud using Workload Identity Federation
         uses: google-github-actions/auth@v2
         with:
+          token_format: 'access_token'
           # Replace with your actual WIF provider and service account email
           workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
