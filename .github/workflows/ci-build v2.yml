@@ -31,13 +31,13 @@ jobs:
       pull-requests: write
 
     steps:
-      # Step 1: Checkout the source code
+      # Step 1: Checkout source code
       - name: Checkout source code
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      # Step 2: Install Google Cloud SDK (to ensure gcloud is available)
+      # Step 2: Install Google Cloud SDK
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
@@ -51,18 +51,18 @@ jobs:
           chmod +x ~/.docker/cli-plugins/docker-compose
           docker compose version
 
-      # Step 4: Authenticate to Google Cloud using Workload Identity Federation
+      # Step 4: Authenticate to Google Cloud using WIF (via GitHub secrets)
       - name: Authenticate with Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
-          service_account: 'github-wif@das-terraform-dry-run.iam.gserviceaccount.com'
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
-      # Step 5: Configure Docker to push to Artifact Registry
+      # Step 5: Configure Docker for pushing to Artifact Registry
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
 
-      # Step 6: Ensure the Artifact Registry repo exists
+      # Step 6: Ensure Artifact Registry repository exists
       - name: Ensure Artifact Registry Repo Exists
         run: |
           REPO_NAME="das-docker-repo"
@@ -77,7 +77,7 @@ jobs:
               --project="$PROJECT_ID"
           fi
 
-      # Step 7: Detect which microservices changed
+      # Step 7: Detect which microservices have changed
       - name: Detect Changed Microservices
         id: changes
         run: |
@@ -99,7 +99,7 @@ jobs:
           services=$(IFS=" "; echo "${changed_services[*]}")
           echo "services=$services" >> "$GITHUB_OUTPUT"
 
-      # Step 8: Build and push Docker images for changed services
+      # Step 8: Build, tag, and push images for changed microservices
       - name: Build, Tag, and Push Changed Images
         if: steps.changes.outputs.services != ''
         env:
@@ -112,17 +112,14 @@ jobs:
           set -e
 
           for svc in ${{ steps.changes.outputs.services }}; do
-            echo "Building and tagging $svc..."
-
-            # Build image using Docker Compose
+            echo "Building $svc..."
             docker compose -f cloud-dry-run/docker-compose.yml build "$svc"
 
             IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$svc"
 
-            # Tag image with commit SHA
+            echo "Tagging $svc with $GIT_SHA"
             docker tag "$IMAGE_URI" "$IMAGE_URI:$GIT_SHA"
 
-            # Tag as 'latest' if on main branch
             if [[ "$BRANCH_NAME" == "main" ]]; then
               docker tag "$IMAGE_URI" "$IMAGE_URI:latest"
             fi
@@ -136,7 +133,7 @@ jobs:
             fi
           done
 
-      # Step 9: Show recent images for changed services
+      # Step 9: List recent images for changed services
       - name: List Recent Images for Changed Services
         if: steps.changes.outputs.services != ''
         run: |
@@ -146,7 +143,7 @@ jobs:
               --format="table(DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
           done
 
-      # Step 10: Show images for all microservices
+      # Step 10: List recent images for all services
       - name: List Images for All Microservices
         run: |
           for svc in microservice-a microservice-b frontend; do
@@ -155,7 +152,7 @@ jobs:
               --format="table(DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
           done
 
-      # Step 11: List all images in Artifact Registry (for visibility)
+      # Step 11: List all images in the registry
       - name: List All Images in Artifact Registry
         run: |
           PROJECT_ID="das-terraform-dry-run"
@@ -168,6 +165,7 @@ jobs:
               --limit=10 \
               --format="table(DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
           done
-      # Step 12: Confirm success
+
+      # Step 12: Final confirmation
       - name: Workflow Completed
         run: echo "CI/CD workflow completed successfully."
