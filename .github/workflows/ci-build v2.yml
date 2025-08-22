@@ -72,7 +72,8 @@ jobs:
             changed_services+=("frontend")
           fi
 
-          echo "services=${changed_services[*]}" >> "$GITHUB_OUTPUT"
+          services_csv=$(IFS=','; echo "${changed_services[*]}")
+          echo "services=$services_csv" >> "$GITHUB_OUTPUT"
 
       # Step 6: Build, Tag, and Push Docker Images
       - name: Build, Tag, and Push Docker Images
@@ -84,7 +85,8 @@ jobs:
           GIT_SHA: ${{ github.sha }}
         run: |
           set -e
-          for svc in ${{ steps.detect.outputs.services }}; do
+          IFS=',' read -ra SERVICES <<< "${{ steps.detect.outputs.services }}"
+          for svc in "${SERVICES[@]}"; do
             echo "Building and pushing $svc"
 
             IMAGE_URI="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$svc"
@@ -106,11 +108,12 @@ jobs:
             docker push "$IMAGE_URI:latest"
           done
 
-      # Step 7: List images for changed services
+      # Step 7: List Pushed Images for Changed Services
       - name: List Pushed Images for Changed Services
         if: steps.detect.outputs.services != ''
         run: |
-          for svc in ${{ steps.detect.outputs.services }}; do
+          IFS=',' read -ra SERVICES <<< "${{ steps.detect.outputs.services }}"
+          for svc in "${SERVICES[@]}"; do
             echo "Listing pushed images for $svc"
             gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
               --limit=5 \
