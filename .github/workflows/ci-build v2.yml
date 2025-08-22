@@ -1,4 +1,4 @@
-name: Build & Deploy Microservices v2 
+name: Build & Deploy Microservices v2
 
 on:
   push:
@@ -33,6 +33,8 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Set up Docker Compose v2
         run: |
@@ -72,33 +74,32 @@ jobs:
             echo "Repository '$REPO_NAME' created successfully."
           fi
 
-     - name: Detect changed microservices
-  id: changes
-  run: |
-    echo "Detecting changed microservices..."
-    changed_services=()
+      - name: Detect changed microservices
+        id: changes
+        run: |
+          echo "Detecting changed microservices..."
+          changed_services=()
 
-    base_ref=$(git merge-base origin/main HEAD)
-    changed_files=$(git diff --name-only "$base_ref" HEAD)
+          base_ref=$(git merge-base origin/main HEAD)
+          changed_files=$(git diff --name-only "$base_ref" HEAD)
 
-    echo "$changed_files"
+          echo "$changed_files"
 
-    if echo "$changed_files" | grep -q "^backend/microservice-a/"; then
-      changed_services+=("microservice-a")
-    fi
-    if echo "$changed_files" | grep -q "^backend/microservice-b/"; then
-      changed_services+=("microservice-b")
-    fi
-    if echo "$changed_files" | grep -q "^frontend/"; then
-      changed_services+=("frontend")
-    fi
+          if echo "$changed_files" | grep -q "^backend/microservice-a/"; then
+            changed_services+=("microservice-a")
+          fi
+          if echo "$changed_files" | grep -q "^backend/microservice-b/"; then
+            changed_services+=("microservice-b")
+          fi
+          if echo "$changed_files" | grep -q "^frontend/"; then
+            changed_services+=("frontend")
+          fi
 
-    # Join array into a single space-separated string
-    services=$(IFS=" "; echo "${changed_services[*]}")
+          # Join array into a single space-separated string
+          services=$(IFS=" "; echo "${changed_services[*]}")
 
-    echo "Changed services: $services"
-    echo "services=$services" >> "$GITHUB_OUTPUT"
-
+          echo "Changed services: $services"
+          echo "services=$services" >> "$GITHUB_OUTPUT"
 
       - name: Build and push changed services
         if: steps.changes.outputs.services != ''
