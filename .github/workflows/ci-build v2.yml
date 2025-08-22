@@ -1,4 +1,4 @@
-name: Build & Push Microservices with Caching
+name: Build & Deploy Microservices
 
 on:
   push:
@@ -6,110 +6,84 @@ on:
     paths:
       - "backend/**"
       - "frontend/**"
-      - "cloud-dry-run/docker-compose.yml"
       - ".github/workflows/**"
-  pull_request:
-    branches: [main]
-    paths:
-      - "backend/**"
-      - "frontend/**"
       - "cloud-dry-run/docker-compose.yml"
-      - ".github/workflows/**"
 
 jobs:
-  build-and-push:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: https://console.cloud.google.com/artifacts
-
-    permissions:
-      contents: read
-      id-token: write
-      pull-requests: write
 
     steps:
-      # 1. Checkout the source code
-      - name: Checkout repository
+      - name: Checkout source code
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
 
-      # 2. Enable Docker BuildKit (for build caching)
-      - name: Enable Docker BuildKit
-        run: echo "DOCKER_BUILDKIT=1" >> $GITHUB_ENV
-
-      # 3. Install Docker Compose v2
-      - name: Install Docker Compose v2
+      - name: Debug — Current directory and top-level files
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Listing top-level files:"
+          ls -la
+      - name: Check docker-compose.yml exists
+        run: |
+          if [ -f cloud-dry-run/docker-compose.yml ]; then
+            echo "docker-compose.yml found"
+          else
+            echo "docker-compose.yml NOT found"
+            exit 1
+          fi
+      - name: Install Docker Compose CLI plugin
         run: |
           mkdir -p ~/.docker/cli-plugins/
           curl -SL https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
           chmod +x ~/.docker/cli-plugins/docker-compose
           docker compose version
-
-      # 4. Authenticate with Google Cloud (WIF)
-      - name: Authenticate with Google Cloud (WIF)
+      - name: Confirm GCP_SA_KEY is injected
+        run: |
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
+            echo "GCP_SA_KEY is missing or not injected!"
+            exit 1
+          else
+            echo "GCP_SA_KEY is present."
+          fi
+      - name: Authenticate with Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
 
-      # 5. Configure Docker to use Artifact Registry
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
-
-      # 6. Detect changed microservices
-      - name: Detect changed microservices
-        id: detect
         run: |
-          changed_services=()
-          base_ref=$(git merge-base origin/main HEAD)
-          changed_files=$(git diff --name-only "$base_ref" HEAD)
-
-          if echo "$changed_files" | grep -q "^backend/microservice-a/"; then
-            changed_services+=("microservice-a")
-          fi
-          if echo "$changed_files" | grep -q "^backend/microservice-b/"; then
-            changed_services+=("microservice-b")
-          fi
-          if echo "$changed_files" | grep -q "^frontend/"; then
-            changed_services+=("frontend")
-          fi
-
-          echo "services=${changed_services[*]}" >> "$GITHUB_OUTPUT"
-
-      # 7. Build and push Docker images using docker-compose
-      - name: Build and Push Docker Images
-        if: steps.detect.outputs.services != ''
+          gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
+      - name: Ensure Artifact Registry repo exists or create it
         run: |
-          for svc in ${{ steps.detect.outputs.services }}; do
-            echo "Building service: $svc"
-            docker compose -f dryrun-cicd/docker-compose.yml build "$svc"
-            echo "Pushing service: $svc"
-            docker compose -f dryrun-cicd/docker-compose.yml push "$svc"
-          done
-
-      # 8. List pushed images for changed services
-      - name: List Pushed Images (changed services)
-        if: steps.detect.outputs.services != ''
+          set -e
+          REPO_NAME="das-docker-repo"
+          LOCATION="australia-southeast1"
+          PROJECT_ID=$(gcloud config get-value project)
+          echo "Checking if Artifact Registry repo '$REPO_NAME' exists in '$LOCATION'..."
+          if gcloud artifacts repositories describe "$REPO_NAME" --location="$LOCATION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            echo "Repository '$REPO_NAME' already exists."
+          else
+            echo "Repository '$REPO_NAME' not found. Creating it now..."
+            gcloud artifacts repositories create "$REPO_NAME" \
+              --repository-format=docker \
+              --location="$LOCATION" \
+              --description="Docker repo for dry run CI/CD" \
+              --project="$PROJECT_ID"
+            echo "Repository '$REPO_NAME' created successfully."
+          fi
+      - name: Build all Docker images with Docker Compose
         run: |
-          for svc in ${{ steps.detect.outputs.services }}; do
-            echo "Artifact Registry images for $svc:"
-            gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
-              --limit=5 \
-              --format="table(DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
-          done
-
-      # 9. List all images in registry (debug/audit)
-      - name: List All Microservice Images in Artifact Registry
+          docker compose -f cloud-dry-run/docker-compose.yml build
+      - name: Push all Docker images with Docker Compose
+        run: |
+          docker compose -f cloud-dry-run/docker-compose.yml push
+      - name: List recent images in Artifact Registry
         run: |
           for svc in microservice-a microservice-b frontend; do
-            echo "Artifact Registry images for $svc:"
+            echo "::group::${svc}"
             gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
               --limit=5 \
-              --format="table(DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
+              --format="table[box](DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
+            echo "::endgroup::"
           done
-
-      # 10. Final confirmation
-      - name: Workflow Complete
-        run: echo "CI/CD build & push pipeline completed."
+      - name: Workflow completed successfully
+        run: echo "CI pipeline completed successfully. All images built and pushed to Google Artifact Registry."
