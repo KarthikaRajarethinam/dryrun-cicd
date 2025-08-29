@@ -1,8 +1,0 @@
-apiVersion: image.toolkit.fluxcd.io/v1beta2
-kind: ImageRepository
-metadata:
-  name: microservice-a
-  namespace: production
-spec:
-  image: australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/microservice-a
-  interval: 1m
