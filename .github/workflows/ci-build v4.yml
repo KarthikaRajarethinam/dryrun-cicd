@@ -74,6 +74,8 @@ jobs:
 
       - name: Detect changed microservices
         id: changes
+        env:
+          MICROSERVICES: ${{ github.event.inputs.microservices }}
         run: |
           echo "Detecting changed microservices..."
           changed=""
@@ -89,7 +91,7 @@ jobs:
           changed_files=$(git diff --name-only -b "$base_ref" HEAD)
           echo "Changed files: $changed_files"
 
-          selected_services="${{ github.event.inputs.microservices }}"
+          selected_services="${MICROSERVICES}"
 
           for svc in $(echo "$selected_services" | tr "," "\n"); do
             if echo "$changed_files" | grep -q "^cloud-dry-run/backend/$svc/"; then
@@ -104,6 +106,9 @@ jobs:
 
           echo "Changed services: $changed"
           echo "services=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Debug changed services output
+        run: echo "Services detected as changed: '${{ steps.changes.outputs.services }}'"
 
       - name: Build and push changed services
         if: steps.changes.outputs.services != ''
