@@ -27,7 +27,7 @@ jobs:
 
       - name: Check docker-compose.yml exists
         run: |
-          if [ -f cloud-dry-run/docker-compose.yml ]; then
+          if [ -f docker-compose.yml ]; then
             echo "docker-compose.yml found"
           else
             echo "docker-compose.yml NOT found"
@@ -73,11 +73,11 @@ jobs:
 
       - name: Build all Docker images with Docker Compose
         run: |
-          docker compose -f cloud-dry-run/docker-compose.yml build
+          docker compose -f docker-compose.yml build
 
       - name: Push all Docker images with Docker Compose
         run: |
-          docker compose -f cloud-dry-run/docker-compose.yml push
+          docker compose -f docker-compose.yml push
 
       - name: List recent images in Artifact Registry
         run: |
