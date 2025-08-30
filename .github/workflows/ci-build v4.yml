@@ -95,7 +95,10 @@ jobs:
       - name: Build and push changed services
         if: steps.changes.outputs.services != ''
         run: |
-          for svc in ${{ steps.changes.outputs.services }}; do
+          # Make sure we have the services to process
+          IFS=' ' read -r -a services <<< "${{ steps.changes.outputs.services }}"
+          
+          for svc in "${services[@]}"; do
             echo "::group::Building $svc"
             docker compose -f docker-compose.yml build "$svc"
             echo "::endgroup::"
@@ -106,7 +109,10 @@ jobs:
 
       - name: List recent images in Artifact Registry
         run: |
-          for svc in ${{ steps.changes.outputs.services }}; do
+          # List the images for the selected services
+          IFS=' ' read -r -a services <<< "${{ steps.changes.outputs.services }}"
+          
+          for svc in "${services[@]}"; do
             echo "::group::Images for $svc"
             gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
               --limit=5 \
