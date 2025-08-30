@@ -19,12 +19,11 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Ensure full commit history for diffing
 
       - name: Debug — Current directory and top-level files
         run: |
           echo "Current directory: $(pwd)"
-          echo "Listing top-level files:"
           ls -la
 
       - name: Check docker-compose.yml exists
@@ -70,7 +69,6 @@ jobs:
               --location="$LOCATION" \
               --description="Docker repo for dry run CI/CD" \
               --project="$PROJECT_ID"
-            echo "Repository '$REPO_NAME' created successfully."
           fi
 
       - name: Detect changed microservices
@@ -78,16 +76,21 @@ jobs:
         run: |
           echo "Detecting changed microservices..."
           changed=""
-          
-          # Compare with previous commit (suitable for single-branch flows)
-          base_ref=HEAD^
-          changed_files=$(git diff --name-only -b "$base_ref" HEAD)
 
+          # Fallback for first commit
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            base_ref=HEAD^
+          else
+            echo "First commit detected, comparing against empty tree"
+            base_ref=$(git hash-object -t tree /dev/null)
+          fi
+
+          changed_files=$(git diff --name-only -b "$base_ref" HEAD)
           echo "Changed files: $changed_files"
 
           selected_services="${{ github.event.inputs.microservices }}"
 
-          for svc in $(echo $selected_services | tr "," "\n"); do
+          for svc in $(echo "$selected_services" | tr "," "\n"); do
             if echo "$changed_files" | grep -q "^cloud-dry-run/backend/$svc/"; then
               changed="$changed $svc"
             fi
@@ -112,7 +115,8 @@ jobs:
             echo "::group::Pushing $svc"
             docker compose -f docker-compose.yml push "$svc"
             echo "::endgroup::"
-          
+          done
+
       - name: List recent images in Artifact Registry
         if: steps.changes.outputs.services != ''
         run: |
@@ -122,6 +126,7 @@ jobs:
               --limit=5 \
               --format="table[box](DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
             echo "::endgroup::"
+          done
 
       - name: Workflow completed successfully
-        run: echo "CI pipeline completed successfully. Selected and changed services built and deployed."
+        run: echo "CI pipeline completed successfully. Changed microservices were built and deployed."
