@@ -140,12 +140,12 @@ jobs:
         run: |
           echo "Building selected services: $BUILD_SERVICES"
           # Compose syntax: docker compose build <service1> <service2> ...
-          docker compose -f docker-compose.yml build $BUILD_SERVICES
+          docker compose -f docker-compose.yml build $(echo $BUILD_SERVICES | tr ',' ' ')
 
       - name: Push selected Docker images with Docker Compose
         run: |
           echo "Pushing selected services: $BUILD_SERVICES"
-          docker compose -f docker-compose.yml push $BUILD_SERVICES
+          docker compose -f docker-compose.yml push $(echo $BUILD_SERVICES | tr ',' ' ')
 
       - name: List recent images in Artifact Registry for selected microservices
         run: |
