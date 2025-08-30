@@ -2,14 +2,14 @@ version: '3.8'
 
 services:
   microservice-a:
-    build: ./backend/microservice-a
+    build: ./cloud-dry-run/backend/microservice-a
     image: australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/microservice-a:latest
     ports:
       - "3001:3001"
     restart: always
 
   microservice-b:
-    build: ./backend/microservice-b
+    build: ./cloud-dry-run/backend/microservice-b
     image: australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/microservice-b:latest
     ports:
       - "3002:3002"
@@ -17,7 +17,7 @@ services:
 
 
   frontend:
-    build: ./frontend
+    build: ./cloud-dry-run/frontend
     image: australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/frontend:latest
     ports:
       - "3000:3000"
