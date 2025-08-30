@@ -1,4 +1,4 @@
-name: Build & Deploy Microservices
+name: Build & Deploy Microservices Automatic triggers
 
 on:
   push:
