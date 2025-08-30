@@ -47,7 +47,7 @@ jobs:
           token_format: 'access_token'
           workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
-          
+
       - name: Configure Docker for Artifact Registry
         run: |
           gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
@@ -77,37 +77,32 @@ jobs:
           echo "Detecting changed microservices..."
           changed=""
           
-          # Ensure we're comparing against the correct base branch (e.g., 'main')
-          base_ref=$(git merge-base origin/main HEAD)
-
-          # Use `git diff` with -b flag to detect whitespace changes and all other code changes
+          # Compare with previous commit (suitable for single-branch flows)
+          base_ref=HEAD^
           changed_files=$(git diff --name-only -b "$base_ref" HEAD)
-          
-          # Debugging: Output the changed files
+
           echo "Changed files: $changed_files"
 
-          # Get list of services user selected
           selected_services="${{ github.event.inputs.microservices }}"
 
-          # Detect changes for selected services
           for svc in $(echo $selected_services | tr "," "\n"); do
-            # Check if the service directory is in the list of changed files
             if echo "$changed_files" | grep -q "^cloud-dry-run/backend/$svc/"; then
               changed="$changed $svc"
             fi
+            if echo "$changed_files" | grep -q "^cloud-dry-run/frontend/"; then
+              if [ "$svc" = "frontend" ]; then
+                changed="$changed frontend"
+              fi
+            fi
           done
 
-          # Output the list of changed services
           echo "Changed services: $changed"
           echo "services=$changed" >> "$GITHUB_OUTPUT"
 
       - name: Build and push changed services
         if: steps.changes.outputs.services != ''
         run: |
-          # Make sure we have the services to process
-          IFS=' ' read -r -a services <<< "${{ steps.changes.outputs.services }}"
-          
-          for svc in "${services[@]}"; do
+          for svc in ${{ steps.changes.outputs.services }}; do
             echo "::group::Building $svc"
             docker compose -f docker-compose.yml build "$svc"
             echo "::endgroup::"
@@ -115,20 +110,11 @@ jobs:
             echo "::group::Pushing $svc"
             docker compose -f docker-compose.yml push "$svc"
             echo "::endgroup::"
-
+          
       - name: List recent images in Artifact Registry
+        if: steps.changes.outputs.services != ''
         run: |
-          # Check if services are available
-          if [ -z "${{ steps.changes.outputs.services }}" ]; then
-            echo "No services have changed, skipping image listing."
-            exit 0
-          fi
-
-          # Split the services into an array
-          IFS=' ' read -r -a services <<< "${{ steps.changes.outputs.services }}"
-
-          # Loop through the selected services and list images for each
-          for svc in "${services[@]}"; do
+          for svc in ${{ steps.changes.outputs.services }}; do
             echo "::group::Images for $svc"
             gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
               --limit=5 \
@@ -136,4 +122,4 @@ jobs:
             echo "::endgroup::"
 
       - name: Workflow completed successfully
-        run: echo "CI pipeline completed successfully. All selected images built and pushed to Google Artifact Registry."
+        run: echo "CI pipeline completed successfully. Selected and changed services built and deployed."
