@@ -87,10 +87,11 @@ jobs:
       - name: Detect changed microservices (optional incremental)
         id: detect_changes
         run: |
-          echo "Detecting changed microservices since last commit on main"
-          git fetch origin main
-          # Get changed files compared to main
-          CHANGED_FILES=$(git diff --name-only origin/main)
+          echo "Fetching full git history to detect changes"
+          git fetch --prune --unshallow || true
+          
+          echo "Detecting changed files in last commit"
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
           echo "Changed files:"
           echo "$CHANGED_FILES"
           
