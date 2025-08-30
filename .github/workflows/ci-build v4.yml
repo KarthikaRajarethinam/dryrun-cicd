@@ -76,19 +76,28 @@ jobs:
         run: |
           echo "Detecting changed microservices..."
           changed=""
+          
+          # Ensure we're comparing against the correct base branch (e.g., 'main')
           base_ref=$(git merge-base origin/main HEAD)
-          changed_files=$(git diff --name-only "$base_ref" HEAD)
+
+          # Use `git diff` with -b flag to detect whitespace changes and all other code changes
+          changed_files=$(git diff --name-only -b "$base_ref" HEAD)
+          
+          # Debugging: Output the changed files
+          echo "Changed files: $changed_files"
 
           # Get list of services user selected
           selected_services="${{ github.event.inputs.microservices }}"
 
           # Detect changes for selected services
           for svc in $(echo $selected_services | tr "," "\n"); do
-            if echo "$changed_files" | grep -q "^$svc/"; then
+            # Check if the service directory is in the list of changed files
+            if echo "$changed_files" | grep -q "^cloud-dry-run/backend/$svc/"; then
               changed="$changed $svc"
             fi
           done
 
+          # Output the list of changed services
           echo "Changed services: $changed"
           echo "services=$changed" >> "$GITHUB_OUTPUT"
 
