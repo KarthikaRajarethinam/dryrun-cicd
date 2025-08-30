@@ -109,9 +109,16 @@ jobs:
 
       - name: List recent images in Artifact Registry
         run: |
-          # List the images for the selected services
+          # Check if services are available
+          if [ -z "${{ steps.changes.outputs.services }}" ]; then
+            echo "No services have changed, skipping image listing."
+            exit 0
+          fi
+
+          # Split the services into an array
           IFS=' ' read -r -a services <<< "${{ steps.changes.outputs.services }}"
-          
+
+          # Loop through the selected services and list images for each
           for svc in "${services[@]}"; do
             echo "::group::Images for $svc"
             gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
