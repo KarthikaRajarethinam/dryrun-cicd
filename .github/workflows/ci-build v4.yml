@@ -1,9 +1,6 @@
-name: Build & Deploy Selective/Incremental Microservices
+name: Build & Deploy Selective/incremental Microservices Manual
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       microservices:
@@ -21,13 +18,12 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0  # Important for full git history to work properly
 
       - name: Debug — Current directory and top-level files
         run: |
           echo "Current directory: $(pwd)"
-          ls -R
+          echo "Listing top-level files:"
+          ls -la
 
       - name: Check docker-compose.yml exists
         run: |
@@ -51,7 +47,7 @@ jobs:
           token_format: 'access_token'
           workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
-
+          
       - name: Configure Docker for Artifact Registry
         run: |
           gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
@@ -75,61 +71,86 @@ jobs:
             echo "Repository '$REPO_NAME' created successfully."
           fi
 
-      - name: Detect changed microservices
-        id: changes
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          AFTER_SHA: ${{ github.event.after }}
-          SELECTED_SERVICES: ${{ github.event.inputs.microservices }}
+      - name: Parse microservices input
+        id: parse
         run: |
-          echo "Detecting changed microservices..."
+          echo "Input microservices: ${{ github.event.inputs.microservices }}"
+          # Convert input to array
+          IFS=',' read -ra SERVICES <<< "${{ github.event.inputs.microservices }}"
+          # Print each service for debug
+          for svc in "${SERVICES[@]}"; do
+            echo "microservice=$svc" >> $GITHUB_OUTPUT
+          done
+          # Also export as a comma separated string for reuse
+          echo "SERVICES=${{ github.event.inputs.microservices }}" >> $GITHUB_ENV
 
-          # Handle initial commit or null SHA for first commit
-          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            echo "Initial commit or no before SHA, comparing against empty tree"
-            base_ref=$(git hash-object -t tree /dev/null)
-          else
-            base_ref=$BEFORE_SHA
+      - name: Detect changed microservices (optional incremental)
+        id: detect_changes
+        run: |
+          echo "Detecting changed microservices since last commit on main"
+          git fetch origin main
+          # Get changed files compared to main
+          CHANGED_FILES=$(git diff --name-only origin/main)
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          CHANGED_SERVICES=""
+          for svc in $(echo "${{ env.SERVICES }}" | tr ',' '\n'); do
+            # Check if any changed file is inside microservice directory or matches service name in path
+            if echo "$CHANGED_FILES" | grep -q "^$svc/" || echo "$CHANGED_FILES" | grep -q "^docker-compose.yml$"; then
+              CHANGED_SERVICES="${CHANGED_SERVICES},${svc}"
+            fi
+          done
+          # Trim leading comma
+          CHANGED_SERVICES="${CHANGED_SERVICES#,}"
+          echo "Changed or affected microservices: $CHANGED_SERVICES"
+          echo "changed_services=$CHANGED_SERVICES" >> $GITHUB_OUTPUT
+
+      - name: Set microservices to build (intersection of input and changes)
+        id: set_build_list
+        run: |
+          INPUT_SERVICES="${{ env.SERVICES }}"
+          CHANGED_SERVICES="${{ steps.detect_changes.outputs.changed_services }}"
+          
+          # If no changes detected, build input services anyway
+          if [ -z "$CHANGED_SERVICES" ]; then
+            echo "No changes detected, building all input microservices: $INPUT_SERVICES"
+            echo "BUILD_SERVICES=$INPUT_SERVICES" >> $GITHUB_ENV
+            exit 0
           fi
-          head_ref=$AFTER_SHA
-
-          changed_files=$(git diff --name-only -b "$base_ref" "$head_ref")
-          echo "Changed files: $changed_files"
-
-          changed=""
-
-          for svc in $(echo "$SELECTED_SERVICES" | tr "," "\n"); do
-            if echo "$changed_files" | grep -q "^cloud-dry-run/backend/$svc/"; then
-              changed="$changed $svc"
-            fi
-            if echo "$changed_files" | grep -q "^cloud-dry-run/frontend/"; then
-              if [ "$svc" = "frontend" ]; then
-                changed="$changed frontend"
-              fi
+          
+          # Find intersection between INPUT_SERVICES and CHANGED_SERVICES
+          BUILD_LIST=""
+          for svc in $(echo "$INPUT_SERVICES" | tr ',' '\n'); do
+            if echo "$CHANGED_SERVICES" | grep -qw "$svc"; then
+              BUILD_LIST="${BUILD_LIST},${svc}"
             fi
           done
+          BUILD_LIST="${BUILD_LIST#,}"
+          
+          if [ -z "$BUILD_LIST" ]; then
+            echo "No selected microservices have changes. Exiting."
+            exit 0
+          else
+            echo "Microservices to build: $BUILD_LIST"
+            echo "BUILD_SERVICES=$BUILD_LIST" >> $GITHUB_ENV
+          fi
 
-          echo "Changed services: $changed"
-          echo "services=$changed" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push changed services
-        if: steps.changes.outputs.services != ''
+      - name: Build selected Docker images with Docker Compose
         run: |
-          for svc in ${{ steps.changes.outputs.services }}; do
-            echo "::group::Building $svc"
-            docker compose -f docker-compose.yml build "$svc"
-            echo "::endgroup::"
+          echo "Building selected services: $BUILD_SERVICES"
+          # Compose syntax: docker compose build <service1> <service2> ...
+          docker compose -f docker-compose.yml build $BUILD_SERVICES
 
-            echo "::group::Pushing $svc"
-            docker compose -f docker-compose.yml push "$svc"
-            echo "::endgroup::"
-          done
-
-      - name: List recent images in Artifact Registry
-        if: steps.changes.outputs.services != ''
+      - name: Push selected Docker images with Docker Compose
         run: |
-          for svc in ${{ steps.changes.outputs.services }}; do
-            echo "::group::Images for $svc"
+          echo "Pushing selected services: $BUILD_SERVICES"
+          docker compose -f docker-compose.yml push $BUILD_SERVICES
+
+      - name: List recent images in Artifact Registry for selected microservices
+        run: |
+          for svc in $(echo "$BUILD_SERVICES" | tr ',' '\n'); do
+            echo "::group::${svc}"
             gcloud artifacts docker images list australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/$svc \
               --limit=5 \
               --format="table[box](DIGEST, TAGS, IMAGE_SIZE_BYTES, UPLOAD_TIME)"
@@ -137,4 +158,4 @@ jobs:
           done
 
       - name: Workflow completed successfully
-        run: echo "CI pipeline completed successfully. Selected & changed images built and pushed to Google Artifact Registry."
+        run: echo "CI pipeline completed successfully. Selected images built and pushed."
