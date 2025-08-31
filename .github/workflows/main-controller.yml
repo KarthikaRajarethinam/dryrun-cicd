@@ -1,84 +1,75 @@
-name: Selective Modular Incremental Controller
+name: Selective Modular Controller
 
 on:
+  
   workflow_dispatch:
     inputs:
       microservice-a:
-        description: "Deploy microservice-a"
+        description: "Run microservice-a"
         required: false
-        default: "true"
+        default: "false"
         type: choice
         options: ["true", "false"]
       microservice-b:
-        description: "Deploy microservice-b"
+        description: "Run microservice-b"
         required: false
-        default: "true"
+        default: "false"
         type: choice
         options: ["true", "false"]
       frontend:
-        description: "Deploy frontend"
+        description: "Run frontend"
         required: false
-        default: "true"
+        default: "false"
         type: choice
         options: ["true", "false"]
 
 permissions:
   id-token: write
-  contents: write
+  contents: read
 
 jobs:
   detect-changes:
+    
     runs-on: ubuntu-latest
     outputs:
       microservice-a: ${{ steps.filter.outputs.microservice-a }}
       microservice-b: ${{ steps.filter.outputs.microservice-b }}
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Detect changes manually
+      - name: Detect changes
         id: filter
-        run: |
-          echo "Detecting changes since last commit on main..."
-          
-          # Get the base commit (first commit or last commit tracked)
-          if [ -f .last-built-commit ]; then
-            BASE_COMMIT=$(cat .last-built-commit)
-          else
-            BASE_COMMIT=$(git rev-list --max-parents=0 HEAD)
-          fi
-          echo "Base commit: $BASE_COMMIT"
-
-          CHANGED_FILES=$(git diff --name-only "$BASE_COMMIT"..HEAD)
-          echo "$CHANGED_FILES" > changed_files.txt
-          
-          detect_change() {
-            local path=$1
-            if grep -q "^$path/" changed_files.txt; then
-              echo "true"
-            else
-              echo "false"
-            fi
-          }
-
-          echo "microservice-a=$(detect_change 'cloud-dry-run/backend/microservice-a')" >> $GITHUB_OUTPUT
-          echo "microservice-b=$(detect_change 'cloud-dry-run/backend/microservice-b')" >> $GITHUB_OUTPUT
-          echo "frontend=$(detect_change 'cloud-dry-run/frontend')" >> $GITHUB_OUTPUT
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            microservice-a:
+              - 'cloud-dry-run/backend/microservice-a/**'
+            microservice-b:
+              - 'cloud-dry-run/backend/microservice-b/**'
+            frontend:
+              - 'cloud-dry-run/frontend/**'
 
   microservice-a:
-    needs: detect-changes
-    if: github.event.inputs.microservice-a == 'true' && needs.detect-changes.outputs.microservice-a == 'true'
+    needs: [detect-changes]
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.microservice-a == 'true') ||
+      (github.event_name == 'push' && needs.detect-changes.outputs.microservice-a == 'true')
     uses: ./.github/workflows/microservice-a-pipeline.yml
 
   microservice-b:
-    needs: detect-changes
-    if: github.event.inputs.microservice-b == 'true' && needs.detect-changes.outputs.microservice-b == 'true'
+    needs: [detect-changes]
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.microservice-b == 'true') ||
+      (github.event_name == 'push' && needs.detect-changes.outputs.microservice-b == 'true')
     uses: ./.github/workflows/microservice-b-pipeline.yml
 
   frontend:
-    needs: detect-changes
-    if: github.event.inputs.frontend == 'true' && needs.detect-changes.outputs.frontend == 'true'
+    needs: [detect-changes]
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.frontend == 'true') ||
+      (github.event_name == 'push' && needs.detect-changes.outputs.frontend == 'true')
     uses: ./.github/workflows/frontend-pipeline.yml
