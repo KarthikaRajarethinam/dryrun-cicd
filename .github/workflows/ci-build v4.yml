@@ -19,7 +19,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Ensure full history for accurate change detection
+          fetch-depth: 0  # full history for change detection
 
       - name: Debug — Current directory and top-level files
         run: |
@@ -91,13 +91,27 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED_FILES"
 
+          declare -A SERVICE_PATHS
+          SERVICE_PATHS[microservice-a]="cloud-dry-run/backend/microservice-a"
+          SERVICE_PATHS[microservice-b]="cloud-dry-run/backend/microservice-b"
+          SERVICE_PATHS[frontend]="cloud-dry-run/frontend"
+
           CHANGED_SERVICES=""
           for svc in $(echo "${{ env.SERVICES }}" | tr ',' '\n'); do
-            if echo "$CHANGED_FILES" | grep -qE "cloud-dry-run/.*/$svc(/|$)" || echo "$CHANGED_FILES" | grep -q "^docker-compose.yml$"; then
+            PATH_TO_CHECK="${SERVICE_PATHS[$svc]}"
+            if echo "$CHANGED_FILES" | grep -q "^$PATH_TO_CHECK/"; then
               CHANGED_SERVICES="${CHANGED_SERVICES},${svc}"
             fi
           done
-          CHANGED_SERVICES="${CHANGED_SERVICES#,}"
+
+          # Also rebuild everything if docker-compose.yml changes
+          if echo "$CHANGED_FILES" | grep -q "^docker-compose.yml$"; then
+            CHANGED_SERVICES="${CHANGED_SERVICES},${{ env.SERVICES }}"
+          fi
+
+          # Remove duplicates
+          CHANGED_SERVICES=$(echo "$CHANGED_SERVICES" | tr ',' '\n' | sort -u | paste -sd "," -)
+
           echo "Changed or affected microservices: $CHANGED_SERVICES"
           echo "changed_services=$CHANGED_SERVICES" >> $GITHUB_OUTPUT
 
