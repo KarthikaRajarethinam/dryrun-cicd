@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write         # Required to push .last-built-commit
-      id-token: write         # ✅ Required for GCP Workload Identity Federation
+      id-token: write         # Required for GCP Workload Identity Federation
 
     env:
       REPO_URL: https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}
@@ -22,7 +22,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Needed for full git history
+          fetch-depth: 0  # Required to detect changes with git
 
       - name: Install Docker Compose CLI plugin
         run: |
@@ -64,7 +64,6 @@ jobs:
 
           echo "Comparing commits: $BASE_COMMIT..HEAD"
           CHANGED_FILES=$(git diff --name-only "$BASE_COMMIT"..HEAD)
-
           echo "Changed files:"
           echo "$CHANGED_FILES"
 
@@ -77,27 +76,30 @@ jobs:
           done
 
           CHANGED_SERVICES="${CHANGED_SERVICES#,}"
+          echo "Changed or affected microservices: $CHANGED_SERVICES"
           echo "changed_services=$CHANGED_SERVICES" >> $GITHUB_OUTPUT
 
-      - name: Skip if no changes
+      - name: Log and skip if no changes
         if: steps.detect_changes.outputs.changed_services == ''
         run: |
           echo "No selected microservices have changes. Skipping build and push."
-          exit 0
 
       - name: Build changed Docker images
+        if: steps.detect_changes.outputs.changed_services != ''
         run: |
           SERVICES="${{ steps.detect_changes.outputs.changed_services }}"
           echo "Building services: $SERVICES"
           docker compose -f docker-compose.yml build $(echo $SERVICES | tr ',' ' ')
 
       - name: Push Docker images
+        if: steps.detect_changes.outputs.changed_services != ''
         run: |
           SERVICES="${{ steps.detect_changes.outputs.changed_services }}"
           echo "Pushing services: $SERVICES"
           docker compose -f docker-compose.yml push $(echo $SERVICES | tr ',' ' ')
 
       - name: Update .last-built-commit and push to main
+        if: steps.detect_changes.outputs.changed_services != ''
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
