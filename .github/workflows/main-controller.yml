@@ -1,41 +1,25 @@
 name: Selective Modular Controller
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
-      microservice-a:
-        description: "Run microservice-a"
-        required: false
-        default: "false"
-        type: choice
-        options: ["true", "false"]
-      microservice-b:
-        description: "Run microservice-b"
-        required: false
-        default: "false"
-        type: choice
-        options: ["true", "false"]
-      frontend:
-        description: "Run frontend"
-        required: false
-        default: "false"
-        type: choice
-        options: ["true", "false"]
+      microservices:
+        description: 'Comma-separated microservices to build & deploy (e.g. microservice-a,microservice-b,frontend)'
+        required: true
+        default: ''
 
 permissions:
   id-token: write
-  contents: read
+  contents: write   # Need write to push .last-built-commit
 
 jobs:
   detect-changes:
-    if: github.event_name == 'push'  # only run on push
     runs-on: ubuntu-latest
     outputs:
       microservice-a: ${{ steps.filter.outputs.microservice-a }}
       microservice-b: ${{ steps.filter.outputs.microservice-b }}
       frontend: ${{ steps.filter.outputs.frontend }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -55,22 +39,33 @@ jobs:
               - 'cloud-dry-run/frontend/**'
 
   microservice-a:
-    needs: [detect-changes]
-    if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.microservice-a == 'true') ||
-      (github.event_name == 'push' && needs.detect-changes.outputs.microservice-a == 'true')
+    needs: detect-changes
+    if: contains(fromJson('["' + github.event.inputs.microservices.replace(',', '","') + '"]'), 'microservice-a') && needs.detect-changes.outputs.microservice-a == 'true'
     uses: ./.github/workflows/microservice-a-pipeline.yml
 
   microservice-b:
-    needs: [detect-changes]
-    if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.microservice-b == 'true') ||
-      (github.event_name == 'push' && needs.detect-changes.outputs.microservice-b == 'true')
+    needs: detect-changes
+    if: contains(fromJson('["' + github.event.inputs.microservices.replace(',', '","') + '"]'), 'microservice-b') && needs.detect-changes.outputs.microservice-b == 'true'
     uses: ./.github/workflows/microservice-b-pipeline.yml
 
   frontend:
-    needs: [detect-changes]
-    if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.frontend == 'true') ||
-      (github.event_name == 'push' && needs.detect-changes.outputs.frontend == 'true')
+    needs: detect-changes
+    if: contains(fromJson('["' + github.event.inputs.microservices.replace(',', '","') + '"]'), 'frontend') && needs.detect-changes.outputs.frontend == 'true'
     uses: ./.github/workflows/frontend-pipeline.yml
+
+  update-commit:
+    needs: [microservice-a, microservice-b, frontend]
+    if: needs.microservice-a.result == 'success' || needs.microservice-b.result == 'success' || needs.frontend.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Update last built commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git rev-parse HEAD > .last-built-commit
+          git add .last-built-commit
+          git commit -m "Update last built commit [skip ci]" || echo "No changes to commit"
+          git push origin HEAD:main
