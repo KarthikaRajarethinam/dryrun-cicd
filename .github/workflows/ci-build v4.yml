@@ -19,7 +19,7 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Needed for git diff to work reliably
+          fetch-depth: 0  # Ensure full history for accurate change detection
 
       - name: Debug — Current directory and top-level files
         run: |
@@ -86,9 +86,6 @@ jobs:
       - name: Detect changed microservices (incremental)
         id: detect_changes
         run: |
-          echo "Fetching full git history for change detection"
-          git fetch --prune --unshallow || true
-
           echo "Detecting changed files in last commit"
           CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
           echo "Changed files:"
@@ -96,7 +93,7 @@ jobs:
 
           CHANGED_SERVICES=""
           for svc in $(echo "${{ env.SERVICES }}" | tr ',' '\n'); do
-            if echo "$CHANGED_FILES" | grep -qE "^$svc/" || echo "$CHANGED_FILES" | grep -q "^docker-compose.yml$"; then
+            if echo "$CHANGED_FILES" | grep -qE "cloud-dry-run/.*/$svc(/|$)" || echo "$CHANGED_FILES" | grep -q "^docker-compose.yml$"; then
               CHANGED_SERVICES="${CHANGED_SERVICES},${svc}"
             fi
           done
