@@ -2,19 +2,36 @@ name: Microservice B Pipeline
 
 on:
   workflow_call:
+    inputs:
+      docker_compose_file:
+        required: false
+        type: string
+        default: docker-compose.yml
+      service_name:
+        required: false
+        type: string
+        default: microservice-b
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    
+
+    permissions:
+      id-token: write
+      contents: read
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Install Docker Compose
         run: |
           mkdir -p ~/.docker/cli-plugins/
           curl -SL https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
           chmod +x ~/.docker/cli-plugins/docker-compose
+          docker compose version
 
       - name: Authenticate with Google Cloud
         uses: google-github-actions/auth@v2
@@ -26,8 +43,12 @@ jobs:
       - name: Configure Docker for GCP
         run: gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
 
-      - name: Build microservice-b
-        run: docker compose -f docker-compose.yml build microservice-b
+      - name: Build microservice-b image
+        run: |
+          echo "Building service: ${{ inputs.service_name }}"
+          docker compose -f ${{ inputs.docker_compose_file }} build ${{ inputs.service_name }}
 
-      - name: Push microservice-b
-        run: docker compose -f docker-compose.yml push microservice-b
+      - name: Push microservice-b image
+        run: |
+          echo "Pushing service: ${{ inputs.service_name }}"
+          docker compose -f ${{ inputs.docker_compose_file }} push ${{ inputs.service_name }}
