@@ -1,0 +1,47 @@
+name: Selective Modular Controller
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      microservice-a: ${{ steps.filter.outputs.microservice-a }}
+      microservice-b: ${{ steps.filter.outputs.microservice-b }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            microservice-a:
+              - 'cloud-dry-run/backend/microservice-a/**'
+            microservice-b:
+              - 'cloud-dry-run/backend/microservice-b/**'
+            frontend:
+              - 'cloud-dry-run/frontend/**'
+
+  microservice-a:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.microservice-a == 'true'
+    uses: ./.github/workflows/microservice-a-pipeline.yml
+
+  microservice-b:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.microservice-b == 'true'
+    uses: ./.github/workflows/microservice-b-pipeline.yml
+
+  frontend:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    uses: ./.github/workflows/frontend-pipeline.yml
