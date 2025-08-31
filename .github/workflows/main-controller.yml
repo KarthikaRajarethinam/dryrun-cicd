@@ -1,4 +1,4 @@
-name: Selective Modular Controller
+name: Main Controller Workflow
 
 on:
   push:
@@ -6,42 +6,54 @@ on:
   workflow_dispatch:
 
 jobs:
-  detect-changes:
+  detect-and-dispatch:
     runs-on: ubuntu-latest
+
     outputs:
-      microservice-a: ${{ steps.filter.outputs.microservice-a }}
-      microservice-b: ${{ steps.filter.outputs.microservice-b }}
-      frontend: ${{ steps.filter.outputs.frontend }}
+      changed-a: ${{ steps.set.outputs.a }}
+      changed-b: ${{ steps.set.outputs.b }}
+      changed-frontend: ${{ steps.set.outputs.frontend }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Detect changes
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            microservice-a:
-              - 'cloud-dry-run/backend/microservice-a/**'
-            microservice-b:
-              - 'cloud-dry-run/backend/microservice-b/**'
-            frontend:
-              - 'cloud-dry-run/frontend/**'
+      - name: Detect Changes
+        id: set
+        run: |
+          git fetch origin main
+          CHANGED_FILES=$(git diff --name-only origin/main)
 
-  microservice-a:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.microservice-a == 'true'
-    uses: ./.github/workflows/microservice-a-pipeline.yml
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
 
-  microservice-b:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.microservice-b == 'true'
-    uses: ./.github/workflows/microservice-b-pipeline.yml
+          echo "a=false" >> $GITHUB_OUTPUT
+          echo "b=false" >> $GITHUB_OUTPUT
+          echo "frontend=false" >> $GITHUB_OUTPUT
 
-  frontend:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.frontend == 'true'
-    uses: ./.github/workflows/frontend-pipeline.yml
+          if echo "$CHANGED_FILES" | grep -q '^cloud-dry-run/backend/microservice-a/'; then
+            echo "a=true" >> $GITHUB_OUTPUT
+          fi
+          if echo "$CHANGED_FILES" | grep -q '^cloud-dry-run/backend/microservice-b/'; then
+            echo "b=true" >> $GITHUB_OUTPUT
+          fi
+          if echo "$CHANGED_FILES" | grep -q '^cloud-dry-run/backend/frontend/'; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+          fi
+
+  call-microservice-a:
+    needs: detect-and-dispatch
+    if: needs.detect-and-dispatch.outputs.changed-a == 'true'
+    uses: ./.github/workflows/microservice-a.yml
+
+  call-microservice-b:
+    needs: detect-and-dispatch
+    if: needs.detect-and-dispatch.outputs.changed-b == 'true'
+    uses: ./.github/workflows/microservice-b.yml
+
+  call-frontend:
+    needs: detect-and-dispatch
+    if: needs.detect-and-dispatch.outputs.changed-frontend == 'true'
+    uses: ./.github/workflows/frontend.yml
