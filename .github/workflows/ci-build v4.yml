@@ -1,4 +1,4 @@
-name: Build & Deploy Selective/incremental Microservices Manual
+name: Build & Deploy Selective/Incremental Microservices Manual
 
 on:
   workflow_dispatch:
@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Needed for git diff to work reliably
 
       - name: Debug — Current directory and top-level files
         run: |
@@ -47,7 +49,7 @@ jobs:
           token_format: 'access_token'
           workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
           service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
-          
+
       - name: Configure Docker for Artifact Registry
         run: |
           gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
@@ -75,34 +77,29 @@ jobs:
         id: parse
         run: |
           echo "Input microservices: ${{ github.event.inputs.microservices }}"
-          # Convert input to array
           IFS=',' read -ra SERVICES <<< "${{ github.event.inputs.microservices }}"
-          # Print each service for debug
           for svc in "${SERVICES[@]}"; do
             echo "microservice=$svc" >> $GITHUB_OUTPUT
           done
-          # Also export as a comma separated string for reuse
           echo "SERVICES=${{ github.event.inputs.microservices }}" >> $GITHUB_ENV
 
-      - name: Detect changed microservices (optional incremental)
+      - name: Detect changed microservices (incremental)
         id: detect_changes
         run: |
-          echo "Fetching full git history to detect changes"
+          echo "Fetching full git history for change detection"
           git fetch --prune --unshallow || true
-          
+
           echo "Detecting changed files in last commit"
           CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
           echo "Changed files:"
           echo "$CHANGED_FILES"
-          
+
           CHANGED_SERVICES=""
           for svc in $(echo "${{ env.SERVICES }}" | tr ',' '\n'); do
-            # Check if any changed file is inside microservice directory or matches service name in path
-            if echo "$CHANGED_FILES" | grep -q "^$svc/" || echo "$CHANGED_FILES" | grep -q "^docker-compose.yml$"; then
+            if echo "$CHANGED_FILES" | grep -qE "^$svc/" || echo "$CHANGED_FILES" | grep -q "^docker-compose.yml$"; then
               CHANGED_SERVICES="${CHANGED_SERVICES},${svc}"
             fi
           done
-          # Trim leading comma
           CHANGED_SERVICES="${CHANGED_SERVICES#,}"
           echo "Changed or affected microservices: $CHANGED_SERVICES"
           echo "changed_services=$CHANGED_SERVICES" >> $GITHUB_OUTPUT
@@ -112,15 +109,13 @@ jobs:
         run: |
           INPUT_SERVICES="${{ env.SERVICES }}"
           CHANGED_SERVICES="${{ steps.detect_changes.outputs.changed_services }}"
-          
-          # If no changes detected, build input services anyway
+
           if [ -z "$CHANGED_SERVICES" ]; then
-            echo "No changes detected, building all input microservices: $INPUT_SERVICES"
-            echo "BUILD_SERVICES=$INPUT_SERVICES" >> $GITHUB_ENV
+            echo "No changes detected, skipping build and push."
+            echo "BUILD_SERVICES=" >> $GITHUB_ENV
             exit 0
           fi
-          
-          # Find intersection between INPUT_SERVICES and CHANGED_SERVICES
+
           BUILD_LIST=""
           for svc in $(echo "$INPUT_SERVICES" | tr ',' '\n'); do
             if echo "$CHANGED_SERVICES" | grep -qw "$svc"; then
@@ -128,9 +123,10 @@ jobs:
             fi
           done
           BUILD_LIST="${BUILD_LIST#,}"
-          
+
           if [ -z "$BUILD_LIST" ]; then
-            echo "No selected microservices have changes. Exiting."
+            echo "No selected microservices have changes. Skipping."
+            echo "BUILD_SERVICES=" >> $GITHUB_ENV
             exit 0
           else
             echo "Microservices to build: $BUILD_LIST"
@@ -138,17 +134,19 @@ jobs:
           fi
 
       - name: Build selected Docker images with Docker Compose
+        if: env.BUILD_SERVICES != ''
         run: |
           echo "Building selected services: $BUILD_SERVICES"
-          # Compose syntax: docker compose build <service1> <service2> ...
           docker compose -f docker-compose.yml build $(echo $BUILD_SERVICES | tr ',' ' ')
 
       - name: Push selected Docker images with Docker Compose
+        if: env.BUILD_SERVICES != ''
         run: |
           echo "Pushing selected services: $BUILD_SERVICES"
           docker compose -f docker-compose.yml push $(echo $BUILD_SERVICES | tr ',' ' ')
 
       - name: List recent images in Artifact Registry for selected microservices
+        if: env.BUILD_SERVICES != ''
         run: |
           for svc in $(echo "$BUILD_SERVICES" | tr ',' '\n'); do
             echo "::group::${svc}"
@@ -159,4 +157,4 @@ jobs:
           done
 
       - name: Workflow completed successfully
-        run: echo "CI pipeline completed successfully. Selected images built and pushed."
+        run: echo "CI pipeline completed. Selected microservices were built and pushed."
