@@ -1,10 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-
+//new comment added
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.enableCors({
-    origin: true, // frontend address
+    origin: true, // frontend address 
     credentials: true,
   });
 
