@@ -4,19 +4,38 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      microservice-a:
+        description: "Run microservice-a"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+      microservice-b:
+        description: "Run microservice-b"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+      frontend:
+        description: "Run frontend"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
 
-permissions:  # ✅ ADD THIS
+permissions:
   id-token: write
   contents: read
 
 jobs:
   detect-changes:
+    if: github.event_name == 'push'  # only run on push
     runs-on: ubuntu-latest
     outputs:
       microservice-a: ${{ steps.filter.outputs.microservice-a }}
       microservice-b: ${{ steps.filter.outputs.microservice-b }}
       frontend: ${{ steps.filter.outputs.frontend }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -36,16 +55,22 @@ jobs:
               - 'cloud-dry-run/frontend/**'
 
   microservice-a:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.microservice-a == 'true'
+    needs: [detect-changes]
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.microservice-a == 'true') ||
+      (github.event_name == 'push' && needs.detect-changes.outputs.microservice-a == 'true')
     uses: ./.github/workflows/microservice-a-pipeline.yml
 
   microservice-b:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.microservice-b == 'true'
+    needs: [detect-changes]
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.microservice-b == 'true') ||
+      (github.event_name == 'push' && needs.detect-changes.outputs.microservice-b == 'true')
     uses: ./.github/workflows/microservice-b-pipeline.yml
 
   frontend:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.frontend == 'true'
+    needs: [detect-changes]
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.frontend == 'true') ||
+      (github.event_name == 'push' && needs.detect-changes.outputs.frontend == 'true')
     uses: ./.github/workflows/frontend-pipeline.yml
