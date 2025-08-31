@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:  # ✅ ADD THIS
+  id-token: write
+  contents: read
+
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
