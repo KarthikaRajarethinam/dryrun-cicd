@@ -1,4 +1,4 @@
-name: Microservice B Pipeline
+name: Microservice B CI
 
 on:
   workflow_call:
@@ -6,27 +6,12 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install Docker Compose
+      - name: Docker Build & Push
         run: |
-          mkdir -p ~/.docker/cli-plugins/
-          curl -SL https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
-          chmod +x ~/.docker/cli-plugins/docker-compose
-
-      - name: Authenticate with Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          token_format: 'access_token'
-          workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
-          service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
-
-      - name: Configure Docker for GCP
-        run: gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
-
-      - name: Build microservice-b
-        run: docker compose -f docker-compose.yml build microservice-b
-
-      - name: Push microservice-b
-        run: docker compose -f docker-compose.yml push microservice-b
+          docker build -t australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/microservice-b:latest ./cloud-dry-run/backend/microservice-b
+          echo "${{ secrets.GCP_AUTH }}" | docker login -u _json_key --password-stdin https://australia-southeast1-docker.pkg.dev
+          docker push australia-southeast1-docker.pkg.dev/das-terraform-dry-run/das-docker-repo/microservice-b:latest
