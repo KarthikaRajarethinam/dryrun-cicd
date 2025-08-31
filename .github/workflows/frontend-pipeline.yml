@@ -1,0 +1,32 @@
+name: Frontend Pipeline
+
+on:
+  workflow_call:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Docker Compose
+        run: |
+          mkdir -p ~/.docker/cli-plugins/
+          curl -SL https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
+          chmod +x ~/.docker/cli-plugins/docker-compose
+
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: 'projects/30467746746/locations/global/workloadIdentityPools/github-cicd/providers/github'
+          service_account: 'cicd-gitops@das-terraform-dry-run.iam.gserviceaccount.com'
+
+      - name: Configure Docker for GCP
+        run: gcloud auth configure-docker australia-southeast1-docker.pkg.dev --quiet
+
+      - name: Build frontend
+        run: docker compose -f docker-compose.yml build frontend
+
+      - name: Push frontend
+        run: docker compose -f docker-compose.yml push frontend
